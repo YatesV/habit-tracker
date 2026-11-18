@@ -27,21 +27,23 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
-          cp app/build/outputs/apk/debug/app-debug.apk HabitTracker.apk
+          cp app/build/outputs/apk/debug/app-debug.apk Habitify.apk
 
       - name: Upload as build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: HabitTracker-apk
-          path: HabitTracker.apk
+          name: Habitify-apk
+          path: Habitify.apk
 
-      # Puts the APK at a fixed link you can open on your phone:
-      # https://github.com/<you>/<repo>/releases/latest/download/HabitTracker.apk
+      # Fixed link you can open on your phone:
+      # https://github.com/<you>/<repo>/releases/latest/download/Habitify.apk
       - name: Publish to "latest" release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: Latest build (#${{ github.run_number }})
-          body: Built from ${{ github.sha }}. Download HabitTracker.apk below and open it to install.
-          files: HabitTracker.apk
-          make_latest: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest Habitify.apk \
+            --target "${{ github.sha }}" \
+            --title "Habitify build #${{ github.run_number }}" \
+            --notes "Download **Habitify.apk** below and open it on your phone to install. Updates install over the old version and keep your data." \
+            --latest

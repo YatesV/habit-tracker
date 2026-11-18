@@ -43,6 +43,15 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { t ->
+            System.getenv("ROBO_DIR")?.let {
+                t.systemProperty("robolectric.offline", "true")
+                t.systemProperty("robolectric.dependency.dir", it)
+            }
+        }
+    }
 }
 
 dependencies {
@@ -55,4 +64,10 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation(composeBom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
