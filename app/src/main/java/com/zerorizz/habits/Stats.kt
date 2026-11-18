@@ -368,6 +368,21 @@ object Stats {
         )
     }
 
+    data class MoodBoost(val habit: Habit, val withIt: Float, val without: Float)
+
+    /** Average mood on days a habit was done vs. not done (needs at least 3 of each). */
+    fun moodBoosters(data: AppData, today: LocalDate): List<MoodBoost> =
+        data.activeHabits.mapNotNull { h ->
+            val withIt = ArrayList<Int>()
+            val without = ArrayList<Int>()
+            data.moods.forEach { (d, m) ->
+                if (d.isAfter(today) || d.isBefore(h.startDate) || !h.isScheduled(d)) return@forEach
+                if (h.isDone(d)) withIt += m else without += m
+            }
+            if (withIt.size < 3 || without.size < 3) null
+            else MoodBoost(h, withIt.average().toFloat(), without.average().toFloat())
+        }.sortedByDescending { it.withIt - it.without }
+
     fun weekdayLabels(): List<String> =
         DayOfWeek.entries.map { it.getDisplayName(java.time.format.TextStyle.NARROW, java.util.Locale.getDefault()) }
 }

@@ -85,6 +85,39 @@ fun StatsScreen(state: AppState, nav: Nav, modifier: Modifier = Modifier) {
                 }
             }
 
+            if (data.addon(Addons.MOOD)) {
+                SectionCard("😊 Mood · last 30 days") {
+                    val days = (29 downTo 0).map { today.minusDays(it.toLong()) }
+                    val vals = days.map { d -> data.moods[d]?.let { (it - 1) / 4f } }
+                    if (vals.all { it == null }) {
+                        Text(
+                            "Log your mood on Today to see it here.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        LineChart(vals, days.map { "${it.monthValue}/${it.dayOfMonth}" }, MaterialTheme.colorScheme.tertiary, percent = false, maxValue = 1f)
+                        val avg = data.moods.filterKeys { !it.isBefore(today.minusDays(29)) }.values.average()
+                        Text(
+                            "Average: ${MOODS[(avg.toFloat() - 1).toInt().coerceIn(0, 4)]} ${"%.1f".format(avg)} / 5",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    val boosters = remember(data, today) { Stats.moodBoosters(data, today) }.filter { it.withIt > it.without }
+                    if (boosters.isNotEmpty()) {
+                        Spacer(Modifier.height(12.dp))
+                        Text("Mood boosters", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                        boosters.take(3).forEach { b ->
+                            Text(
+                                "${b.habit.emoji} ${b.habit.name}: mood +${"%.1f".format(b.withIt - b.without)} on days you do it",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
             SectionCard("Leaderboard · last 30 days") {
                 o.ranking.forEachIndexed { i, r ->
                     val c = habitColor(r.habit.color)

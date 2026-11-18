@@ -6,9 +6,16 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -25,10 +32,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val state = AppState(applicationContext)
+        val billing = BillingManager(applicationContext) { pro -> runOnUiThread { state.setPro(pro) } }
+        billing.start()
         setContent {
             HabitifyTheme(state.data.settings) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    HabitifyApp(state)
+                    CompositionLocalProvider(LocalBilling provides billing) {
+                        HabitifyApp(state)
+                    }
                 }
             }
         }
@@ -39,6 +50,23 @@ private data class Tab(val label: String, val icon: @Composable () -> Unit)
 
 @Composable
 fun HabitifyApp(state: AppState) {
+    val capture = rememberProofCapture(state)
+    CompositionLocalProvider(LocalProofCapture provides capture) {
+        Box(Modifier.fillMaxSize()) {
+            Crossfade(targetState = state.data.settings.onboarded, animationSpec = tween(500), label = "onboard") { onboarded ->
+                if (onboarded) MainApp(state) else OnboardingScreen(state)
+            }
+            ConfettiOverlay(
+                trigger = state.celebrateTick,
+                big = state.celebrateBig,
+                enabled = state.data.addon(Addons.CELEBRATIONS),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MainApp(state: AppState) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var stack by remember { mutableStateOf(listOf<Route>()) }
     val nav = remember {
@@ -75,21 +103,43 @@ fun HabitifyApp(state: AppState) {
             },
         ) { padding ->
             val m = Modifier.padding(bottom = padding.calculateBottomPadding())
-            when (tab) {
-                0 -> TodayScreen(state, nav, m)
-                1 -> StatsScreen(state, nav, m)
-                2 -> JournalScreen(state, nav, m)
-                else -> ProfileScreen(state, nav, m)
+            AnimatedContent(
+                targetState = tab,
+                transitionSpec = {
+                    val dir = if (targetState > initialState) 1 else -1
+                    (fadeIn(tween(220)) + slideInHorizontally(tween(260)) { dir * it / 10 }) togetherWith fadeOut(tween(150))
+                },
+                label = "tabs",
+            ) { t ->
+                when (t) {
+                    0 -> TodayScreen(state, nav, m)
+                    1 -> StatsScreen(state, nav, m)
+                    2 -> JournalScreen(state, nav, m)
+                    else -> ProfileScreen(state, nav, m)
+                }
             }
         }
 
         AnimatedContent(
-            targetState = stack.lastOrNull(),
+            targetState = stack,
+            contentKey = { it.lastOrNull() },
             transitionSpec = {
-                (fadeIn() + slideInHorizontally { it / 6 }) togetherWith fadeOut()
+                val top = targetState.lastOrNull() ?: initialState.lastOrNull()
+                val forward = targetState.size >= initialState.size
+                if (top == Route.Paywall) {
+                    if (forward) (slideInVertically { it } + fadeIn()) togetherWith fadeOut()
+                    else fadeIn() togetherWith (slideOutVertically { it } + fadeOut())
+                } else if (forward) {
+                    (slideInHorizontally(tween(320)) { it } + fadeIn(tween(200))) togetherWith
+                        (slideOutHorizontally(tween(320)) { -it / 4 } + fadeOut(tween(200)))
+                } else {
+                    (slideInHorizontally(tween(320)) { -it / 4 } + fadeIn(tween(200))) togetherWith
+                        (slideOutHorizontally(tween(320)) { it } + fadeOut(tween(200)))
+                }
             },
             label = "route",
-        ) { route ->
+        ) { s ->
+            val route = s.lastOrNull()
             if (route != null) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     when (route) {
@@ -97,6 +147,8 @@ fun HabitifyApp(state: AppState) {
                         is Route.HabitEdit -> HabitEditScreen(state, route.id, nav)
                         is Route.JournalEdit -> JournalEditScreen(state, route.date, nav)
                         Route.Settings -> SettingsScreen(state, nav)
+                        Route.Addons -> AddonsScreen(state, nav)
+                        Route.Paywall -> PaywallScreen(state, nav)
                     }
                 }
             }

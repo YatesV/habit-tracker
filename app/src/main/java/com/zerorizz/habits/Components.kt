@@ -3,6 +3,7 @@ package com.zerorizz.habits
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,6 +26,8 @@ sealed interface Route {
     data class HabitEdit(val id: Long?) : Route
     data class JournalEdit(val date: LocalDate) : Route
     data object Settings : Route
+    data object Addons : Route
+    data object Paywall : Route
 }
 
 class Nav(
@@ -234,5 +237,21 @@ fun EmptyState(emoji: String, title: String, body: String, modifier: Modifier = 
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
+    }
+}
+
+@Composable
+fun ProBadge(modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+                androidx.compose.ui.graphics.Brush.horizontalGradient(
+                    listOf(Color(0xFFFFB300), Color(0xFFFF6F00))
+                )
+            )
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    ) {
+        Text("PRO", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Color.White)
     }
 }

@@ -10,6 +10,9 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -61,10 +64,11 @@ fun HabitifyTheme(settings: Settings, content: @Composable () -> Unit) {
         ThemeMode.DARK, ThemeMode.AMOLED -> true
     }
     val ctx = LocalContext.current
-    var scheme = if (settings.accent < 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-    } else {
-        seededScheme(if (settings.accent < 0) HabitColors[0] else habitColor(settings.accent), dark)
+    var scheme = when {
+        settings.customAccent != null -> seededScheme(Color(settings.customAccent), dark)
+        settings.accent < 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+            if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+        else -> seededScheme(if (settings.accent < 0) HabitColors[0] else habitColor(settings.accent), dark)
     }
     if (settings.theme == ThemeMode.AMOLED) {
         scheme = scheme.copy(
@@ -85,7 +89,10 @@ fun HabitifyTheme(settings: Settings, content: @Composable () -> Unit) {
             ctl.isAppearanceLightNavigationBars = !dark
         }
     }
-    MaterialTheme(colorScheme = scheme, content = content)
+    val density = LocalDensity.current
+    CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * settings.textScale)) {
+        MaterialTheme(colorScheme = scheme, content = content)
+    }
 }
 
 /* Small icons not in the core icon set */

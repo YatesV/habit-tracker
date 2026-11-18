@@ -1,6 +1,15 @@
 package com.zerorizz.habits
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,8 +30,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -42,15 +52,20 @@ fun TodayScreen(state: AppState, nav: Nav, modifier: Modifier = Modifier) {
     var tagFilter by remember { mutableStateOf<String?>(null) }
     var reorder by remember { mutableStateOf(false) }
     var valueFor by remember { mutableStateOf<Pair<Long, LocalDate>?>(null) }
+    var viewProof by remember { mutableStateOf<Pair<Long, LocalDate>?>(null) }
     var confirmDelete by remember { mutableStateOf<Habit?>(null) }
 
-    val active = data.habits.filter { !it.archived }
+    val active = data.activeHabits
     val allTags = active.flatMap { it.tags }.distinct().sorted()
     val shown = active.filter { tagFilter == null || tagFilter in it.tags }
     val scheduled = active.filter { it.isScheduled(selected) }
     val done = scheduled.count { it.isDone(selected) }
     val likelihoods = remember(data, today) { active.associate { it.id to Stats.likelihood(it, today) } }
     val profile = remember(data, today) { Stats.profile(data, today) }
+
+    fun newHabit() {
+        if (Pro.canAddHabits(data)) nav.open(Route.HabitEdit(null)) else nav.open(Route.Paywall)
+    }
 
     Scaffold(
         modifier = modifier,
@@ -80,7 +95,7 @@ fun TodayScreen(state: AppState, nav: Nav, modifier: Modifier = Modifier) {
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = { nav.open(Route.HabitEdit(null)) },
+                onClick = { newHabit() },
                 icon = { Icon(Icons.Default.Add, null) },
                 text = { Text("New habit") },
             )
@@ -94,8 +109,18 @@ fun TodayScreen(state: AppState, nav: Nav, modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "dates") { DateStrip(active, selected, today) { selected = it } }
+            if (data.addon(Addons.MOTIVATION) && selected == today) {
+                item(key = "motivation") { MotivationCard(today, Modifier.animateItem()) }
+            }
             item(key = "summary") {
                 SummaryCard(done, scheduled.size, selected == today, profile, settings) { nav.switchTab(3) }
+            }
+            if (data.addon(Addons.MOOD)) {
+                item(key = "mood") {
+                    MoodCard(data.moods[selected], Modifier.animateItem()) { m ->
+                        state.setMood(selected, if (data.moods[selected] == m) null else m)
+                    }
+                }
             }
             if (allTags.isNotEmpty()) {
                 item(key = "tags") {
@@ -115,7 +140,7 @@ fun TodayScreen(state: AppState, nav: Nav, modifier: Modifier = Modifier) {
             }
             if (active.isEmpty()) {
                 item(key = "empty") {
-                    EmptyState("🌱", "No habits yet", "Tap \"New habit\" to add your first one. Try a count, a timer, or a habit to quit.")
+                    EmptyState("🌱", "No habits yet", "Tap \"New habit\", or grab a ready-made pack from Add-ons in Settings.")
                 }
             }
             val groups: Map<String, List<Habit>> =
@@ -129,7 +154,7 @@ fun TodayScreen(state: AppState, nav: Nav, modifier: Modifier = Modifier) {
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 8.dp, start = 4.dp),
+                            modifier = Modifier.padding(top = 8.dp, start = 4.dp).animateItem(),
                         )
                     }
                 }
@@ -142,10 +167,12 @@ fun TodayScreen(state: AppState, nav: Nav, modifier: Modifier = Modifier) {
                         settings = settings,
                         likelihood = likelihoods[h.id],
                         reorder = reorder,
+                        modifier = Modifier.animateItem(),
                         onOpen = { nav.open(Route.HabitDetail(h.id)) },
                         onEdit = { nav.open(Route.HabitEdit(h.id)) },
                         onDelete = { confirmDelete = h },
                         onValue = { d -> valueFor = h.id to d },
+                        onViewProof = { d -> viewProof = h.id to d },
                     )
                 }
             }
@@ -160,15 +187,65 @@ fun TodayScreen(state: AppState, nav: Nav, modifier: Modifier = Modifier) {
             }
         }
     }
+    viewProof?.let { (id, d) ->
+        state.habit(id)?.let { h -> ProofViewer(state, h, d) { viewProof = null } }
+    }
     confirmDelete?.let { h ->
         ConfirmDialog(
             "Delete \"${h.name}\"?",
-            "This removes the habit and all its history. Archive it instead if you might want it back.",
+            "This removes the habit, its history and its proof photos. Archive it instead if you might want it back.",
             "Delete",
             onDismiss = { confirmDelete = null },
         ) {
             state.delete(h.id)
             confirmDelete = null
+        }
+    }
+}
+
+@Composable
+private fun MotivationCard(today: LocalDate, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("💬", fontSize = 20.sp)
+        Spacer(Modifier.width(12.dp))
+        Text(
+            motivationFor(today),
+            style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+    }
+}
+
+@Composable
+private fun MoodCard(mood: Int?, modifier: Modifier = Modifier, onPick: (Int) -> Unit) {
+    ElevatedCard(modifier.fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text("How are you feeling?", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                MOODS.forEachIndexed { i, e ->
+                    val sel = mood == i + 1
+                    val scale by animateFloatAsState(if (sel) 1.25f else if (mood == null) 1f else 0.85f, spring(0.4f), label = "mood")
+                    Box(
+                        Modifier
+                            .size(48.dp)
+                            .scale(scale)
+                            .clip(CircleShape)
+                            .background(if (sel) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+                            .clickable { onPick(i + 1) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(e, fontSize = 26.sp, modifier = Modifier.alpha(if (mood == null || sel) 1f else 0.5f))
+                    }
+                }
+            }
         }
     }
 }
@@ -182,11 +259,12 @@ private fun DateStrip(habits: List<Habit>, selected: LocalDate, today: LocalDate
             val frac = if (sched.isEmpty()) 0f else sched.count { it.isDone(d) }.toFloat() / sched.size
             val isSel = d == selected
             val cs = MaterialTheme.colorScheme
+            val bg by animateColorAsState(if (isSel) cs.primary else cs.surfaceContainerHigh, label = "date")
             Column(
                 Modifier
                     .width(48.dp)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(if (isSel) cs.primary else cs.surfaceContainerHigh)
+                    .background(bg)
                     .clickable { onSelect(d) }
                     .padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -231,7 +309,7 @@ private fun SummaryCard(
     Card(
         Modifier.fillMaxWidth().clickable(onClick = onProfile),
         colors = CardDefaults.cardColors(containerColor = cs.primaryContainer),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape((settings.corner + 4).dp),
     ) {
         Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
             ProgressRing(
@@ -241,20 +319,30 @@ private fun SummaryCard(
                 stroke = 9.dp,
                 track = cs.primary.copy(alpha = 0.15f),
             ) {
-                Text("$done/$total", fontWeight = FontWeight.Bold, color = cs.onPrimaryContainer)
+                AnimatedContent(
+                    targetState = done,
+                    transitionSpec = {
+                        if (targetState > initialState) (slideInVertically { it } + fadeIn()) togetherWith (slideOutVertically { -it } + fadeOut())
+                        else (slideInVertically { -it } + fadeIn()) togetherWith (slideOutVertically { it } + fadeOut())
+                    },
+                    label = "count",
+                ) { n ->
+                    Text("$n/$total", fontWeight = FontWeight.Bold, color = cs.onPrimaryContainer)
+                }
             }
             Spacer(Modifier.width(16.dp))
             Column {
-                Text(
-                    when {
+                AnimatedContent(
+                    targetState = when {
                         total == 0 -> "Rest day"
                         done == total -> "All done 🎉"
                         else -> "${total - done} to go"
                     },
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = cs.onPrimaryContainer,
-                )
+                    transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.9f)) togetherWith fadeOut() },
+                    label = "headline",
+                ) { t ->
+                    Text(t, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = cs.onPrimaryContainer)
+                }
                 if (isToday && settings.showLikelihood && profile.followThrough != null) {
                     Text(
                         "🎯 ${pct(profile.followThrough)} follow-through odds",
@@ -282,37 +370,53 @@ fun HabitCard(
     settings: Settings,
     likelihood: Float?,
     reorder: Boolean,
+    modifier: Modifier = Modifier,
     onOpen: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onValue: (LocalDate) -> Unit,
+    onViewProof: (LocalDate) -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
     val color = habitColor(h.color)
     val done = h.isDone(date)
     val scheduled = h.isScheduled(date)
     val streak = Stats.currentStreak(h, today)
+    val capture = LocalProofCapture.current
     var menu by remember { mutableStateOf(false) }
-    val container by animateColorAsState(
-        if (done && h.type != HabitType.QUIT) lerp(cs.surfaceContainerLow, color, 0.14f) else cs.surfaceContainerLow,
-        label = "card",
-    )
+    val (colors, border) = habitCardColors(settings.cardStyle, color, done && h.type != HabitType.QUIT)
+    val shape = RoundedCornerShape(settings.corner.dp)
     val subtitle = buildList {
         if (!scheduled) add("Rest day")
-        if (h.type != HabitType.CHECK) add(h.progressText(date))
+        if (h.awaitingProof(date)) add("📸 Proof needed")
+        else if (h.type != HabitType.CHECK) add(h.progressText(date))
         if (streak > 0) add(if (h.type == HabitType.QUIT) "🧊 $streak clean" else "🔥 $streak")
+        if (h.needsProof(date) && h.hasProof(date)) add("📸 Proven")
         if (settings.showLikelihood && date == today && scheduled && !(done && h.type != HabitType.QUIT)) {
             likelihood?.let { add("${pct(it)} likely") }
         }
         if (isEmpty()) add(if (done) "Done" else "Not yet")
     }.joinToString("  ·  ")
 
+    /** Day-level tap used by the week row: proof habits go through the camera. */
+    fun tapDay(d: LocalDate) {
+        when {
+            h.type == HabitType.CHECK && h.needsProof(d) && !h.isDone(d) -> capture.request(h.id, d)
+            h.type == HabitType.CHECK || h.type == HabitType.QUIT -> state.toggle(h.id, d)
+            else -> onValue(d)
+        }
+    }
+
     Card(
-        Modifier.fillMaxWidth().alpha(if (scheduled) 1f else 0.6f),
-        colors = CardDefaults.cardColors(containerColor = container),
-        shape = RoundedCornerShape(20.dp),
+        modifier.fillMaxWidth().alpha(if (scheduled) 1f else 0.6f),
+        colors = colors,
+        border = border,
+        shape = shape,
     ) {
-        Box {
+        Box(
+            if (settings.cardStyle == CardStyle.GRADIENT) Modifier.background(gradientBrush(color, done && h.type != HabitType.QUIT))
+            else Modifier
+        ) {
             Column(
                 Modifier
                     .combinedClickable(onClick = onOpen, onLongClick = { menu = true })
@@ -332,7 +436,7 @@ fun HabitCard(
                         Text(
                             subtitle,
                             style = MaterialTheme.typography.bodySmall,
-                            color = cs.onSurfaceVariant,
+                            color = if (h.awaitingProof(date)) cs.error else cs.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -341,13 +445,18 @@ fun HabitCard(
                         IconButton(onClick = { state.move(h.id, -1) }) { Icon(Icons.Default.KeyboardArrowUp, "Move up") }
                         IconButton(onClick = { state.move(h.id, 1) }) { Icon(Icons.Default.KeyboardArrowDown, "Move down") }
                     } else {
-                        QuickAction(h, date, today, state, color, onValue)
+                        if (h.awaitingProof(date) && h.type != HabitType.CHECK) {
+                            FilledTonalIconButton(onClick = { capture.request(h.id, date) }) { Icon(CameraIcon, "Add proof photo") }
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        QuickAction(h, date, today, state, color, onValue, onViewProof)
                     }
                 }
                 if (h.type == HabitType.COUNT || h.type == HabitType.TIMER || h.type == HabitType.NUMBER) {
                     Spacer(Modifier.height(10.dp))
+                    val p by animateFloatAsState(h.progress(date), spring(dampingRatio = 0.7f), label = "prog")
                     LinearProgressIndicator(
-                        progress = { h.progress(date) },
+                        progress = { p },
                         modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
                         color = color,
                         trackColor = color.copy(alpha = 0.15f),
@@ -357,9 +466,7 @@ fun HabitCard(
                 }
                 if (settings.showWeekRow && !settings.compact) {
                     Spacer(Modifier.height(12.dp))
-                    WeekDots(h, date, color) { d ->
-                        if (h.type == HabitType.CHECK || h.type == HabitType.QUIT) state.toggle(h.id, d) else onValue(d)
-                    }
+                    WeekDots(h, date, color) { d -> tapDay(d) }
                 }
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -373,6 +480,16 @@ fun HabitCard(
                     leadingIcon = { Icon(Icons.Default.Create, null) },
                     onClick = { menu = false; onValue(date) },
                 )
+                if (h.requireProof && h.supportsProof) {
+                    DropdownMenuItem(
+                        text = { Text(if (h.hasProof(date)) "View proof" else "Add proof photo") },
+                        leadingIcon = { Icon(CameraIcon, null) },
+                        onClick = {
+                            menu = false
+                            if (h.hasProof(date)) onViewProof(date) else capture.request(h.id, date)
+                        },
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text("Archive") },
                     leadingIcon = { Icon(ArchiveIcon, null) },
@@ -396,22 +513,48 @@ private fun QuickAction(
     state: AppState,
     color: Color,
     onValue: (LocalDate) -> Unit,
+    onViewProof: (LocalDate) -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
     val filled = IconButtonDefaults.filledIconButtonColors(containerColor = color, contentColor = onColorFor(color))
+    val capture = LocalProofCapture.current
+    val (bounce, play) = rememberBounce()
     when (h.type) {
         HabitType.CHECK -> {
             val done = h.isDone(date)
+            val needsPhoto = h.needsProof(date)
             val bg by animateColorAsState(if (done) color else cs.surfaceVariant, label = "chk")
             Box(
-                Modifier.size(48.dp).clip(CircleShape).background(bg).clickable { state.toggle(h.id, date) },
+                Modifier
+                    .bounce(bounce)
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(bg)
+                    .clickable {
+                        play()
+                        when {
+                            needsPhoto && !done -> capture.request(h.id, date)
+                            needsPhoto && done -> onViewProof(date)
+                            else -> state.toggle(h.id, date)
+                        }
+                    },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    Icons.Default.Check,
-                    if (done) "Done" else "Mark done",
-                    tint = if (done) onColorFor(color) else cs.onSurfaceVariant,
-                )
+                AnimatedContent(
+                    targetState = done to needsPhoto,
+                    transitionSpec = { scaleIn(spring(0.4f)) togetherWith fadeOut() },
+                    label = "chkIcon",
+                ) { (d, photo) ->
+                    Icon(
+                        if (photo && !d) CameraIcon else Icons.Default.Check,
+                        when {
+                            photo && !d -> "Take proof photo"
+                            d -> "Done"
+                            else -> "Mark done"
+                        },
+                        tint = if (d) onColorFor(color) else cs.onSurfaceVariant,
+                    )
+                }
             }
         }
         HabitType.COUNT -> Row(verticalAlignment = Alignment.CenterVertically) {
@@ -421,9 +564,11 @@ private fun QuickAction(
                 }
                 Spacer(Modifier.width(6.dp))
             }
-            FilledIconButton(onClick = { state.increment(h.id, date, 1.0) }, colors = filled) {
-                Icon(Icons.Default.Add, "Add one")
-            }
+            FilledIconButton(
+                onClick = { play(); state.increment(h.id, date, 1.0) },
+                colors = filled,
+                modifier = Modifier.bounce(bounce),
+            ) { Icon(Icons.Default.Add, "Add one") }
         }
         HabitType.TIMER -> {
             if (date == today) {
@@ -438,17 +583,13 @@ private fun QuickAction(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (running) {
                         val secs = ((now - (h.timerStartedAt ?: now)) / 1000).coerceAtLeast(0)
-                        Text(
-                            "%d:%02d".format(secs / 60, secs % 60),
-                            fontWeight = FontWeight.Bold,
-                            color = color,
-                            fontSize = 16.sp,
-                        )
+                        Text("%d:%02d".format(secs / 60, secs % 60), fontWeight = FontWeight.Bold, color = color, fontSize = 16.sp)
                         Spacer(Modifier.width(8.dp))
                     }
                     FilledIconButton(
-                        onClick = { if (running) state.stopTimer(h.id) else state.startTimer(h.id) },
+                        onClick = { play(); if (running) state.stopTimer(h.id) else state.startTimer(h.id) },
                         colors = filled,
+                        modifier = Modifier.bounce(bounce),
                     ) {
                         Icon(if (running) PauseIcon else Icons.Default.PlayArrow, if (running) "Stop timer" else "Start timer")
                     }
@@ -482,13 +623,16 @@ fun WeekDots(h: Habit, endDate: LocalDate, color: Color, onTap: (LocalDate) -> U
             val p = h.progress(d)
             val hasEntry = h.value(d) > 0
             val isEnd = offset == 0
-            val fill = when {
-                h.type == HabitType.QUIT && hasEntry -> Color(0xFFE53935)
-                h.type == HabitType.QUIT -> if (d.isBefore(h.startDate)) cs.surfaceVariant else color.copy(alpha = 0.55f)
-                p >= 1f -> color
-                p > 0f -> color.copy(alpha = 0.25f + 0.5f * p)
-                else -> cs.surfaceVariant
-            }
+            val fill by animateColorAsState(
+                when {
+                    h.type == HabitType.QUIT && hasEntry -> Color(0xFFE53935)
+                    h.type == HabitType.QUIT -> if (d.isBefore(h.startDate)) cs.surfaceVariant else color.copy(alpha = 0.55f)
+                    h.isDone(d) -> color
+                    p > 0f -> color.copy(alpha = 0.25f + 0.5f * p)
+                    else -> cs.surfaceVariant
+                },
+                label = "dot",
+            )
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     d.dayOfWeek.getDisplayName(TextStyle.NARROW, Locale.getDefault()),
@@ -507,10 +651,10 @@ fun WeekDots(h: Habit, endDate: LocalDate, color: Color, onTap: (LocalDate) -> U
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        d.dayOfMonth.toString(),
-                        fontSize = 12.sp,
+                        if (h.hasProof(d)) "📸" else d.dayOfMonth.toString(),
+                        fontSize = if (h.hasProof(d)) 13.sp else 12.sp,
                         fontWeight = if (isEnd) FontWeight.Bold else FontWeight.Normal,
-                        color = if (p >= 1f && h.type != HabitType.QUIT) onColorFor(color) else cs.onSurface,
+                        color = if (h.isDone(d) && h.type != HabitType.QUIT) onColorFor(color) else cs.onSurface,
                     )
                 }
             }

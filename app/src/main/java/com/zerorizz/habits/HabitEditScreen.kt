@@ -52,6 +52,8 @@ fun HabitEditScreen(state: AppState, id: Long?, nav: Nav) {
     var folder by remember { mutableStateOf(existing?.folder ?: "") }
     var note by remember { mutableStateOf(TextFieldValue(existing?.note ?: "")) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var requireProof by remember { mutableStateOf(existing?.requireProof ?: false) }
+    var allowGallery by remember { mutableStateOf(existing?.allowGallery ?: false) }
 
     val needsTarget = type == HabitType.COUNT || type == HabitType.TIMER || type == HabitType.NUMBER
     val targetValue = target.toDoubleOrNull()
@@ -71,6 +73,13 @@ fun HabitEditScreen(state: AppState, id: Long?, nav: Nav) {
             tags = tags,
             folder = folder.trim(),
             note = note.text,
+            requireProof = requireProof && type != HabitType.QUIT,
+            allowGallery = allowGallery,
+            proofSince = when {
+                !requireProof -> null
+                existing?.requireProof == true -> existing.proofSince
+                else -> java.time.LocalDate.now()
+            },
         )
         state.upsert(h)
         nav.back()
@@ -145,6 +154,53 @@ fun HabitEditScreen(state: AppState, id: Long?, nav: Nav) {
                                 singleLine = true,
                                 modifier = Modifier.weight(1f),
                             )
+                        }
+                    }
+                }
+            }
+
+            if (type != HabitType.QUIT) {
+                Section("Photo proof") {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("📸", fontSize = 24.sp)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("Require a photo", fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        "It only counts once you prove it, like a pic of your toothbrush.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Switch(checked = requireProof, onCheckedChange = { requireProof = it })
+                            }
+                            if (requireProof) {
+                                Spacer(Modifier.height(10.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Allow gallery photos", fontWeight = FontWeight.Medium)
+                                        Text(
+                                            if (allowGallery) "Camera or gallery" else "Strict: camera only, so it has to be taken now",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Switch(checked = allowGallery, onCheckedChange = { allowGallery = it })
+                                }
+                                if (existing != null && !existing.requireProof) {
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        "Starts today. Past days stay as they are.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
                         }
                     }
                 }

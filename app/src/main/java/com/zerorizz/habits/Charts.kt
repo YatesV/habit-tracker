@@ -1,6 +1,12 @@
 package com.zerorizz.habits
 
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.PathMeasure
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -11,7 +17,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,7 +58,11 @@ fun ProgressRing(
     track: Color = MaterialTheme.colorScheme.surfaceVariant,
     content: @Composable BoxScope.() -> Unit = {},
 ) {
-    val anim by animateFloatAsState(progress.coerceIn(0f, 1f), label = "ring")
+    val ring = remember { Animatable(0f) }
+    LaunchedEffect(progress) {
+        ring.animateTo(progress.coerceIn(0f, 1f), spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow))
+    }
+    val anim = ring.value
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.matchParentSize()) {
             val s = stroke.toPx()
@@ -173,7 +182,13 @@ fun LineChart(
     val surface = MaterialTheme.colorScheme.surface
     val tm = rememberTextMeasurer()
     val labelStyle = TextStyle(fontSize = 10.sp, color = labelColor)
+    val reveal = remember { Animatable(0f) }
+    LaunchedEffect(points) {
+        reveal.snapTo(0f)
+        reveal.animateTo(1f, tween(900, easing = FastOutSlowInEasing))
+    }
     Canvas(modifier.fillMaxWidth().height(height)) {
+        val r = reveal.value
         val leftPad = 36.dp.toPx()
         val topPad = 8.dp.toPx()
         val bottomPad = 20.dp.toPx()
@@ -213,12 +228,19 @@ fun LineChart(
                 lineTo(pts.first().x, topPad + h)
                 close()
             }
-            drawPath(area, Brush.verticalGradient(listOf(color.copy(alpha = 0.35f), Color.Transparent), topPad, topPad + h))
-            drawPath(line, color, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(area, Brush.verticalGradient(listOf(color.copy(alpha = 0.35f * r), Color.Transparent), topPad, topPad + h))
+            val pm = PathMeasure()
+            pm.setPath(line, false)
+            val seg = Path()
+            pm.getSegment(0f, pm.length * r, seg, true)
+            drawPath(seg, color, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
+        val revealX = leftPad + w * r + 1f
         pts.forEach {
-            drawCircle(color, 4.5.dp.toPx(), it)
-            drawCircle(surface, 2.dp.toPx(), it)
+            if (it.x <= revealX) {
+                drawCircle(color, 4.5.dp.toPx(), it)
+                drawCircle(surface, 2.dp.toPx(), it)
+            }
         }
         val every = ceil(labels.size / 6.0).toInt().coerceAtLeast(1)
         labels.forEachIndexed { i, l ->
@@ -249,7 +271,11 @@ fun BarChart(
     ) {
         values.forEachIndexed { i, v ->
             val frac = ((v ?: 0f) / if (maxValue <= 0f) 1f else maxValue).coerceIn(0f, 1f)
-            val anim by animateFloatAsState(frac, label = "bar")
+            val bar = remember { Animatable(0f) }
+            LaunchedEffect(frac) {
+                bar.animateTo(frac, spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessLow))
+            }
+            val anim = bar.value
             Column(
                 Modifier.weight(1f).fillMaxHeight(),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -282,7 +308,10 @@ fun RadarChart(axes: List<Pair<String, Float>>, color: Color, modifier: Modifier
     val tm = rememberTextMeasurer()
     val grid = MaterialTheme.colorScheme.outlineVariant
     val style = TextStyle(fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+    val grow = remember { Animatable(0f) }
+    LaunchedEffect(axes) { grow.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessVeryLow)) }
     Canvas(modifier) {
+        val gv = grow.value
         val n = axes.size
         if (n < 3) return@Canvas
         val center = Offset(size.width / 2, size.height / 2)
@@ -304,14 +333,14 @@ fun RadarChart(axes: List<Pair<String, Float>>, color: Color, modifier: Modifier
         for (i in 0 until n) drawLine(grid, center, pt(i, radius), 1.dp.toPx())
         val vp = Path()
         axes.forEachIndexed { i, (_, v) ->
-            val q = pt(i, radius * v.coerceIn(0.04f, 1f))
+            val q = pt(i, radius * v.coerceIn(0.04f, 1f) * gv)
             if (i == 0) vp.moveTo(q.x, q.y) else vp.lineTo(q.x, q.y)
         }
         vp.close()
         drawPath(vp, color.copy(alpha = 0.3f))
         drawPath(vp, color, style = Stroke(2.5.dp.toPx(), join = StrokeJoin.Round))
         axes.forEachIndexed { i, (label, v) ->
-            drawCircle(color, 4.dp.toPx(), pt(i, radius * v.coerceIn(0.04f, 1f)))
+            drawCircle(color, 4.dp.toPx(), pt(i, radius * v.coerceIn(0.04f, 1f) * gv))
             val lay = tm.measure(label, style)
             val lp = pt(i, radius + 17.dp.toPx())
             drawText(lay, topLeft = Offset(lp.x - lay.size.width / 2f, lp.y - lay.size.height / 2f))

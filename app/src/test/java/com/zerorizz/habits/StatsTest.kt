@@ -83,4 +83,26 @@ class StatsTest {
         assertEquals(listOf("win", "life/goals"), extractTags("#win today, see #life/goals not a#tag"))
         assertEquals("- [x] a\n- [ ] b", toggleTaskLine("- [ ] a\n- [ ] b", 0))
     }
+
+    @Test fun proofRequired() {
+        val h = Habit(id = 7, name = "Brush teeth", requireProof = true, proofSince = today.minusDays(1),
+            createdAt = today.minusDays(10),
+            entries = mapOf(today.minusDays(3) to 1.0, today.minusDays(1) to 1.0, today to 1.0))
+        assertTrue(h.isDone(today.minusDays(3)))          // before proof started: counts
+        assertFalse(h.isDone(today.minusDays(1)))         // needs a photo
+        assertTrue(h.awaitingProof(today.minusDays(1)))
+        val proven = h.copy(proofs = mapOf(today.minusDays(1) to "a.jpg", today to "b.jpg"))
+        assertTrue(proven.isDone(today.minusDays(1)))
+        assertEquals(2, Stats.currentStreak(proven, today))
+        assertFalse(Habit(id = 8, name = "Q", type = HabitType.QUIT, requireProof = true).needsProof(today))
+    }
+
+    @Test fun packRoundTripIsSafe() {
+        // HabitPack JSON relies on org.json, which is only stubbed on the JVM; covered by the Robolectric test.
+        val p = BUILT_IN_PACKS.first { it.id == "morning" }
+        assertTrue(p.habits.any { it.requireProof })
+        assertEquals(5, Pro.FREE_HABIT_LIMIT)
+        assertFalse(Pro.canAddHabits(AppData(habits = List(5) { Habit(it.toLong(), "h$it") })))
+        assertTrue(Pro.canAddHabits(AppData(habits = List(5) { Habit(it.toLong(), "h$it") }, settings = Settings(pro = true))))
+    }
 }

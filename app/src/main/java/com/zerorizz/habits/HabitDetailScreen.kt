@@ -1,6 +1,11 @@
 package com.zerorizz.habits
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -34,6 +39,8 @@ fun HabitDetailScreen(state: AppState, id: Long, nav: Nav) {
     var trendMode by remember { mutableIntStateOf(0) }
     var pickDate by remember { mutableStateOf(false) }
     var valueDate by remember { mutableStateOf<LocalDate?>(null) }
+    var viewProof by remember { mutableStateOf<LocalDate?>(null) }
+    val capture = LocalProofCapture.current
 
     val s = remember(h, today) {
         object {
@@ -117,6 +124,49 @@ fun HabitDetailScreen(state: AppState, id: Long, nav: Nav) {
             }
             StatGrid(tiles)
 
+            if (h.requireProof || h.proofs.isNotEmpty()) {
+                val photos = h.proofs.entries.sortedByDescending { it.key.toEpochDay() }
+                SectionCard(
+                    "📸 Proof gallery (${photos.size})",
+                    action = if (h.needsProof(today) && !h.hasProof(today)) {
+                        { TextButton(onClick = { capture.request(h.id, today) }) { Text("Prove today") } }
+                    } else null,
+                ) {
+                    if (photos.isEmpty()) {
+                        Text(
+                            "No proof yet. Complete this habit to take your first photo.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(photos, key = { it.key.toEpochDay() }) { (d, file) ->
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    ProofImage(
+                                        state.proofFile(file),
+                                        Modifier.size(96.dp).clip(RoundedCornerShape(14.dp)).clickable { viewProof = d },
+                                    )
+                                    Text(
+                                        d.format(DateTimeFormatter.ofPattern("MMM d")),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                        val needed = (0L until 30L).map { today.minusDays(it) }.filter { h.needsProof(it) && h.isScheduled(it) && h.goalMet(it) }
+                        if (needed.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Proof rate (30 days): ${pct(needed.count { h.hasProof(it) }.toFloat() / needed.size)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+
             SectionCard("Last 12 months") {
                 Heatmap(s.heat, color, today, settings.weekStartsMonday)
             }
@@ -193,11 +243,20 @@ fun HabitDetailScreen(state: AppState, id: Long, nav: Nav) {
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable { if (h.type == HabitType.CHECK) state.toggle(h.id, d) else valueDate = d }
+                            .clickable {
+                                when {
+                                    h.hasProof(d) -> viewProof = d
+                                    h.type == HabitType.CHECK && h.needsProof(d) -> capture.request(h.id, d)
+                                    h.type == HabitType.CHECK -> state.toggle(h.id, d)
+                                    else -> valueDate = d
+                                }
+                            }
                             .padding(vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(friendlyDate(d, today), Modifier.weight(1f))
+                        if (h.hasProof(d)) Text("📸 ", fontSize = 14.sp)
+                        if (h.awaitingProof(d)) Text("needs proof · ", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                         Text(
                             if (!h.isScheduled(d) && h.value(d) == 0.0) "Rest day" else h.formatValue(h.value(d)),
                             color = if (h.isDone(d) && h.isScheduled(d)) color else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -214,9 +273,14 @@ fun HabitDetailScreen(state: AppState, id: Long, nav: Nav) {
     if (pickDate) {
         PickDateDialog(today, onDismiss = { pickDate = false }) { d ->
             pickDate = false
-            if (h.type == HabitType.CHECK) state.toggle(h.id, d) else valueDate = d
+            when {
+                h.type == HabitType.CHECK && h.needsProof(d) && !h.isDone(d) -> capture.request(h.id, d)
+                h.type == HabitType.CHECK -> state.toggle(h.id, d)
+                else -> valueDate = d
+            }
         }
     }
+    viewProof?.let { d -> ProofViewer(state, h, d) { viewProof = null } }
     valueDate?.let { d ->
         ValueDialog(h, d, onDismiss = { valueDate = null }) { v ->
             state.setValue(h.id, d, v)
